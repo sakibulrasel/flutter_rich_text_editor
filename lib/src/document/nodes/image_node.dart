@@ -19,6 +19,7 @@ class ImageNode extends EditorNode {
     this.x = 0,
     this.y = 0,
     this.zIndex = 0,
+    this.rotationDegrees = 0,
     this.anchorBlockId,
     this.wrapSegments = const [TextSegment(text: '')],
     this.wrapAlignment = ImageWrapAlignment.none,
@@ -35,6 +36,7 @@ class ImageNode extends EditorNode {
   final double x;
   final double y;
   final int zIndex;
+  final double rotationDegrees;
   final String? anchorBlockId;
   final List<TextSegment> wrapSegments;
   final ImageWrapAlignment wrapAlignment;
@@ -55,6 +57,7 @@ class ImageNode extends EditorNode {
     double? x,
     double? y,
     int? zIndex,
+    double? rotationDegrees,
     String? anchorBlockId,
     List<TextSegment>? wrapSegments,
     ImageWrapAlignment? wrapAlignment,
@@ -70,6 +73,7 @@ class ImageNode extends EditorNode {
       x: x ?? this.x,
       y: y ?? this.y,
       zIndex: zIndex ?? this.zIndex,
+      rotationDegrees: rotationDegrees ?? this.rotationDegrees,
       anchorBlockId: anchorBlockId ?? this.anchorBlockId,
       wrapSegments: List<TextSegment>.unmodifiable(
         wrapSegments ?? this.wrapSegments,
@@ -96,6 +100,7 @@ class ImageNode extends EditorNode {
       x: (json['x'] as num?)?.toDouble() ?? 0,
       y: (json['y'] as num?)?.toDouble() ?? 0,
       zIndex: (json['zIndex'] as num?)?.toInt() ?? 0,
+      rotationDegrees: (json['rotationDegrees'] as num?)?.toDouble() ?? 0,
       anchorBlockId: json['anchorBlockId'] as String?,
       wrapSegments: List<TextSegment>.unmodifiable(
         ((json['wrapSegments'] as List<dynamic>?) ??
@@ -126,6 +131,7 @@ class ImageNode extends EditorNode {
       'x': x,
       'y': y,
       'zIndex': zIndex,
+      'rotationDegrees': rotationDegrees,
       'anchorBlockId': anchorBlockId,
       'wrapText': wrapText,
       'wrapSegments': wrapSegments.map((segment) => segment.toJson()).toList(),

@@ -207,6 +207,14 @@ class RichTextEditorController extends ChangeNotifier {
   }
 
   void setActiveTextSelection(String id, TextSelection selection) {
+    if (_activeTextNodeId == id &&
+        _selectedNodeId == id &&
+        _activeSelection == selection &&
+        _activeListNodeId == null &&
+        _activeListItemIndex == null &&
+        _activeListSelection == const TextSelection.collapsed(offset: -1)) {
+      return;
+    }
     _activeTextNodeId = id;
     _selectedNodeId = id;
     _activeListNodeId = null;
@@ -230,6 +238,14 @@ class RichTextEditorController extends ChangeNotifier {
     int itemIndex,
     TextSelection selection,
   ) {
+    if (_activeListNodeId == nodeId &&
+        _activeListItemIndex == itemIndex &&
+        _activeListSelection == selection &&
+        _selectedNodeId == nodeId &&
+        _activeTextNodeId == null &&
+        _activeSelection == const TextSelection.collapsed(offset: -1)) {
+      return;
+    }
     _activeTextNodeId = null;
     _activeSelection = const TextSelection.collapsed(offset: -1);
     _activeListNodeId = nodeId;
@@ -293,6 +309,9 @@ class RichTextEditorController extends ChangeNotifier {
   }
 
   void selectNode(String id) {
+    if (_selectedNodeId == id) {
+      return;
+    }
     _selectedNodeId = id;
     notifyListeners();
   }
@@ -484,6 +503,32 @@ class RichTextEditorController extends ChangeNotifier {
     );
     final nextNodes = nodes.toList();
     nextNodes[nodeIndex] = node.copyWith(segments: nextSegments);
+    _document = _document.copyWith(nodes: nextNodes);
+    _redoStack.clear();
+    notifyListeners();
+  }
+
+  void removeInlineMathSegment(String nodeId, int segmentIndex) {
+    final nodeIndex = nodes.indexWhere((node) => node.id == nodeId);
+    if (nodeIndex == -1) {
+      return;
+    }
+    final node = nodes[nodeIndex];
+    if (node is! TextBlockNode ||
+        segmentIndex < 0 ||
+        segmentIndex >= node.segments.length ||
+        !node.segments[segmentIndex].isInlineMath) {
+      return;
+    }
+
+    _pushUndoState();
+    final nextSegments = node.segments.toList()..removeAt(segmentIndex);
+    final nextNodes = nodes.toList();
+    nextNodes[nodeIndex] = node.copyWith(
+      segments: nextSegments.isEmpty
+          ? const [TextSegment(text: '')]
+          : _mergeSegments(nextSegments),
+    );
     _document = _document.copyWith(nodes: nextNodes);
     _redoStack.clear();
     notifyListeners();
@@ -714,6 +759,38 @@ class RichTextEditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void removeListInlineMathSegment(
+    String nodeId,
+    int itemIndex,
+    int segmentIndex,
+  ) {
+    final nodeIndex = nodes.indexWhere((node) => node.id == nodeId);
+    if (nodeIndex == -1) {
+      return;
+    }
+    final node = nodes[nodeIndex];
+    if (node is! ListNode ||
+        itemIndex < 0 ||
+        itemIndex >= node.items.length ||
+        segmentIndex < 0 ||
+        segmentIndex >= node.items[itemIndex].length ||
+        !node.items[itemIndex][segmentIndex].isInlineMath) {
+      return;
+    }
+
+    _pushUndoState();
+    final nextItems = node.items.toList();
+    final nextItem = nextItems[itemIndex].toList()..removeAt(segmentIndex);
+    nextItems[itemIndex] = nextItem.isEmpty
+        ? const [TextSegment(text: '')]
+        : _mergeSegments(nextItem);
+    final nextNodes = nodes.toList();
+    nextNodes[nodeIndex] = node.copyWith(items: nextItems);
+    _document = _document.copyWith(nodes: nextNodes);
+    _redoStack.clear();
+    notifyListeners();
+  }
+
   void insertImage({
     required String url,
     String altText = '',
@@ -724,6 +801,7 @@ class RichTextEditorController extends ChangeNotifier {
     double x = 0,
     double y = 0,
     int zIndex = 0,
+    double rotationDegrees = 0,
     String? anchorBlockId,
     String wrapText = '',
     List<TextSegment>? wrapSegments,
@@ -743,6 +821,7 @@ class RichTextEditorController extends ChangeNotifier {
       x: x,
       y: y,
       zIndex: zIndex,
+      rotationDegrees: rotationDegrees,
       anchorBlockId: anchorBlockId,
       wrapSegments: wrapSegments ?? <TextSegment>[TextSegment(text: wrapText)],
       wrapAlignment: wrapAlignment,
@@ -768,6 +847,7 @@ class RichTextEditorController extends ChangeNotifier {
     double? x,
     double? y,
     int? zIndex,
+    double? rotationDegrees,
     String? anchorBlockId,
     String? wrapText,
     List<TextSegment>? wrapSegments,
@@ -785,6 +865,7 @@ class RichTextEditorController extends ChangeNotifier {
         x: x,
         y: y,
         zIndex: zIndex,
+        rotationDegrees: rotationDegrees,
         anchorBlockId: anchorBlockId,
         wrapSegments: wrapSegments ??
             (wrapText != null ? [TextSegment(text: wrapText)] : null),
@@ -800,7 +881,26 @@ class RichTextEditorController extends ChangeNotifier {
     double? x,
     double? y,
     int? zIndex,
+    double? rotationDegrees,
+    String? anchorBlockId,
   }) {
+    final index = nodes.indexWhere((node) => node.id == id);
+    if (index == -1) {
+      return;
+    }
+    final node = nodes[index];
+    if (node is! ImageNode) {
+      return;
+    }
+    if ((width == null || width == node.width) &&
+        (height == null || height == node.height) &&
+        (x == null || x == node.x) &&
+        (y == null || y == node.y) &&
+        (zIndex == null || zIndex == node.zIndex) &&
+        (rotationDegrees == null || rotationDegrees == node.rotationDegrees) &&
+        (anchorBlockId == null || anchorBlockId == node.anchorBlockId)) {
+      return;
+    }
     _replaceNode(
       id,
       (node) => (node as ImageNode).copyWith(
@@ -809,6 +909,8 @@ class RichTextEditorController extends ChangeNotifier {
         x: x,
         y: y,
         zIndex: zIndex,
+        rotationDegrees: rotationDegrees,
+        anchorBlockId: anchorBlockId,
       ),
       shouldPushHistory: false,
     );
@@ -873,6 +975,32 @@ class RichTextEditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void removeImageWrapInlineMathSegment(String id, int segmentIndex) {
+    final index = nodes.indexWhere((node) => node.id == id);
+    if (index == -1) {
+      return;
+    }
+    final node = nodes[index];
+    if (node is! ImageNode ||
+        segmentIndex < 0 ||
+        segmentIndex >= node.wrapSegments.length ||
+        !node.wrapSegments[segmentIndex].isInlineMath) {
+      return;
+    }
+
+    _pushUndoState();
+    final nextSegments = node.wrapSegments.toList()..removeAt(segmentIndex);
+    final nextNodes = nodes.toList();
+    nextNodes[index] = node.copyWith(
+      wrapSegments: nextSegments.isEmpty
+          ? const [TextSegment(text: '')]
+          : _mergeSegments(nextSegments),
+    );
+    _document = _document.copyWith(nodes: nextNodes);
+    _redoStack.clear();
+    notifyListeners();
+  }
+
   void updateMathNode(String id, String latex) {
     _replaceNode(id, (node) => (node as MathNode).copyWith(latex: latex));
   }
@@ -902,6 +1030,18 @@ class RichTextEditorController extends ChangeNotifier {
       );
     }
     _document = _document.copyWith(nodes: nextNodes);
+    if (_selectedNodeId == id) {
+      _selectedNodeId = nextNodes.first.id;
+    }
+    if (_activeTextNodeId == id) {
+      _activeTextNodeId = null;
+      _activeSelection = const TextSelection.collapsed(offset: -1);
+    }
+    if (_activeListNodeId == id) {
+      _activeListNodeId = null;
+      _activeListItemIndex = null;
+      _activeListSelection = const TextSelection.collapsed(offset: -1);
+    }
     _redoStack.clear();
     notifyListeners();
   }

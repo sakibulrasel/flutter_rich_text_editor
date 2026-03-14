@@ -612,6 +612,18 @@ class _MathDialogState extends State<_MathDialog> {
         ),
       ),
       actions: [
+        if (widget.initialLatex.trim().isNotEmpty)
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(
+                MathEditResult.delete(displayMode: _displayMode),
+              );
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),

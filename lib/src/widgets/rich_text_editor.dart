@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -10,30 +11,14 @@ import 'package:rich_text_editor/src/document/nodes/image_node.dart';
 import 'package:rich_text_editor/src/document/nodes/list_node.dart';
 import 'package:rich_text_editor/src/document/nodes/math_node.dart';
 import 'package:rich_text_editor/src/document/nodes/text_block_node.dart';
-import 'package:rich_text_editor/src/document/text_segment.dart';
 import 'package:rich_text_editor/src/math/math_dialog.dart';
 import 'package:rich_text_editor/src/widgets/segmented_text_editing_controller.dart';
+import 'package:rich_text_editor/src/widgets/wrapped_flow_editor.dart';
 
 const double _kMinImageWidth = 32.0;
 const double _kMinImageHeight = 28.0;
 
-class _FlowExclusionBand {
-  const _FlowExclusionBand({
-    required this.top,
-    required this.bottom,
-    required this.leftInset,
-    required this.rightInset,
-    required this.blockedStart,
-    required this.blockedEnd,
-  });
-
-  final double top;
-  final double bottom;
-  final double leftInset;
-  final double rightInset;
-  final double blockedStart;
-  final double blockedEnd;
-}
+typedef _FlowExclusionBand = FlowExclusionBand;
 
 class RichTextEditor extends StatefulWidget {
   const RichTextEditor({
@@ -93,15 +78,16 @@ class _RichTextEditorState extends State<RichTextEditor> {
           return node is! ImageNode ||
               node.layoutMode != ImageLayoutMode.floating;
         }).toList();
-        final floatingImages =
-            widget.controller.nodes.whereType<ImageNode>().where(
-                  (node) => node.layoutMode == ImageLayoutMode.floating,
-                );
+        final floatingImages = widget.controller.nodes
+            .whereType<ImageNode>()
+            .where((node) => node.layoutMode == ImageLayoutMode.floating)
+            .toList()
+          ..sort((a, b) => a.zIndex.compareTo(b.zIndex));
         final floatingRects = <String, Rect>{
           for (final node in floatingImages)
             node.id: _buildFloatingRect(
               node,
-              _nodeRects[node.anchorBlockId],
+              _resolvedAnchorRect(node),
             ),
         };
         return Column(
@@ -158,9 +144,9 @@ class _RichTextEditorState extends State<RichTextEditor> {
                               constraints.maxHeight,
                             ),
                             padding: widget.padding,
-                            anchorRect: node.anchorBlockId == null
-                                ? null
-                                : _nodeRects[node.anchorBlockId!],
+                            anchorRect: _resolvedAnchorRect(node),
+                            onResolveAnchorId: (rect) =>
+                                _nearestAnchorIdForFloatingRect(rect, node.id),
                           ),
                         ),
                       ],
@@ -251,6 +237,63 @@ class _RichTextEditorState extends State<RichTextEditor> {
     return Rect.fromLTWH(baseLeft + node.x, baseTop + node.y, width, height);
   }
 
+  Rect? _resolvedAnchorRect(ImageNode node) {
+    if (node.anchorBlockId != null) {
+      return _nodeRects[node.anchorBlockId!];
+    }
+    final documentNodes = widget.controller.nodes;
+    final imageIndex =
+        documentNodes.indexWhere((candidate) => candidate.id == node.id);
+    if (imageIndex <= 0) {
+      return null;
+    }
+    for (var i = imageIndex - 1; i >= 0; i--) {
+      final candidate = documentNodes[i];
+      if (candidate is ImageNode &&
+          candidate.layoutMode == ImageLayoutMode.floating) {
+        continue;
+      }
+      final rect = _nodeRects[candidate.id];
+      if (rect != null) {
+        return rect;
+      }
+    }
+    return null;
+  }
+
+  String? _nearestAnchorIdForFloatingRect(Rect floatingRect, String imageId) {
+    String? bestId;
+    double? bestScore;
+    for (final node in widget.controller.nodes) {
+      if (node.id == imageId) {
+        continue;
+      }
+      if (node is ImageNode && node.layoutMode == ImageLayoutMode.floating) {
+        continue;
+      }
+      final rect = _nodeRects[node.id];
+      if (rect == null) {
+        continue;
+      }
+      final overlapHeight = math.max(
+        0.0,
+        math.min(floatingRect.bottom, rect.bottom) -
+            math.max(floatingRect.top, rect.top),
+      );
+      final verticalDistance = overlapHeight > 0
+          ? 0.0
+          : (floatingRect.center.dy - rect.center.dy).abs();
+      final horizontalDistance =
+          (floatingRect.center.dx - rect.center.dx).abs() * 0.15;
+      final score = verticalDistance + horizontalDistance;
+      if (bestScore == null || score < bestScore) {
+        bestScore = score;
+        bestId = node.id;
+      }
+    }
+    return bestId;
+  }
+
   EdgeInsets _buildExclusionPadding(
     String nodeId,
     Map<String, Rect> floatingRects,
@@ -328,18 +371,26 @@ class _EditorToolbar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           children: [
-            FilledButton.tonal(
+            OutlinedButton(
               onPressed: () {
                 controller.insertParagraph();
               },
-              child: const Text('Paragraph'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(40, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+              child: const Text('P'),
             ),
             const SizedBox(width: 8),
-            FilledButton.tonal(
+            OutlinedButton(
               onPressed: () {
                 controller.insertParagraph(style: TextBlockStyle.heading1);
               },
-              child: const Text('Heading 1'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(40, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+              child: const Text('H1'),
             ),
             const SizedBox(width: 8),
             IconButton(
@@ -379,7 +430,7 @@ class _EditorToolbar extends StatelessWidget {
               tooltip: 'Convert to numbered list',
             ),
             const SizedBox(width: 8),
-            FilledButton.tonal(
+            IconButton(
               onPressed: () async {
                 final inlineNodeId =
                     controller.activeTextNodeId ?? controller.lastTextNodeId;
@@ -438,41 +489,25 @@ class _EditorToolbar extends StatelessWidget {
                   );
                 }
               },
-              child: const Text('Math'),
+              icon: const Icon(Icons.functions),
+              tooltip: 'Insert math',
             ),
             const SizedBox(width: 8),
             IconButton(
-              onPressed: () async {
-                final result = await showMathDialog(
-                  context,
-                  initialDisplayMode: MathDisplayMode.block,
-                );
-                if (result == null) {
-                  return;
-                }
-                controller.insertMath(
-                  latex: result.latex,
-                  displayMode: MathDisplayMode.block,
-                );
-              },
-              icon: const Icon(Icons.functions),
-              tooltip: 'Insert block math',
-            ),
-            const SizedBox(width: 8),
-            FilledButton.tonal(
               onPressed: () {
                 controller.insertList(items: const ['List item']);
               },
-              child: const Text('List'),
+              icon: const Icon(Icons.playlist_add),
+              tooltip: 'Insert list',
             ),
             const SizedBox(width: 8),
-            FilledButton.tonal(
+            IconButton(
               onPressed: () async {
                 final image = await showDialog<_ImageDialogResult>(
                   context: context,
                   builder: (context) => const _ImageDialog(),
                 );
-                if (image == null || image.url.trim().isEmpty) {
+                if (image == null || image.delete || image.url.trim().isEmpty) {
                   return;
                 }
                 controller.insertImage(
@@ -485,6 +520,7 @@ class _EditorToolbar extends StatelessWidget {
                   x: image.x,
                   y: image.y,
                   zIndex: image.zIndex,
+                  rotationDegrees: image.rotationDegrees,
                   anchorBlockId: image.anchorBlockId ??
                       controller.activeTextNodeId ??
                       controller.activeListNodeId ??
@@ -493,7 +529,8 @@ class _EditorToolbar extends StatelessWidget {
                   wrapAlignment: image.wrapAlignment,
                 );
               },
-              child: const Text('Image'),
+              icon: const Icon(Icons.image_outlined),
+              tooltip: 'Insert image',
             ),
             const SizedBox(width: 8),
             IconButton(
@@ -554,6 +591,13 @@ class _EditorToolbar extends StatelessWidget {
               onPressed: controller.canRedo ? controller.redo : null,
               icon: const Icon(Icons.redo),
               tooltip: 'Redo',
+            ),
+            IconButton(
+              onPressed: controller.selectedNodeId != null
+                  ? () => controller.removeNode(controller.selectedNodeId!)
+                  : null,
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Delete selected block',
             ),
           ],
         ),
@@ -712,12 +756,22 @@ class _TextBlockEditorState extends State<_TextBlockEditor> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (showWrappedPreview)
-          GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTap: () {
-              setState(() {
-                _showInlineWrappedEditor = true;
-              });
+          WrappedEditableSurface(
+            segments: widget.node.segments,
+            previewTextStyle:
+                textStyle ?? Theme.of(context).textTheme.bodyLarge!,
+            exclusionBands: widget.exclusionBands,
+            isEditing: _showInlineWrappedEditor,
+            focusNode: _focusNode,
+            controller: _textController,
+            textStyle: textStyle,
+            hintText: 'Edit wrapped paragraph',
+            onActivate: () {
+              if (!_showInlineWrappedEditor) {
+                setState(() {
+                  _showInlineWrappedEditor = true;
+                });
+              }
               widget.controller.setActiveTextSelection(
                 widget.node.id,
                 _textController.selection.isValid
@@ -732,39 +786,26 @@ class _TextBlockEditorState extends State<_TextBlockEditor> {
                 SystemChannels.textInput.invokeMethod<void>('TextInput.show');
               });
             },
-            child: _WrappedParagraphPreview(
-              segments: widget.node.segments,
-              textStyle: textStyle ?? Theme.of(context).textTheme.bodyLarge!,
-              exclusionBands: widget.exclusionBands,
-            ),
-          ),
-        if (showWrappedPreview && _showInlineWrappedEditor)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: _InlineWrappedEditorPanel(
-              title: 'Edit wrapped paragraph',
-              focusNode: _focusNode,
-              controller: _textController,
-              textStyle: textStyle,
-              hintText: 'Edit wrapped paragraph',
-              onClose: () {
-                setState(() {
-                  _showInlineWrappedEditor = false;
-                });
-              },
-              onTap: () {
-                widget.controller.setActiveTextSelection(
-                  widget.node.id,
-                  _textController.selection,
-                );
-              },
-              onChanged: () {
-                widget.controller.syncTextEditingValue(
-                  widget.node.id,
-                  _textController.value,
-                );
-              },
-            ),
+            onSelectionChanged: (selection) {
+              widget.controller.setActiveTextSelection(
+                widget.node.id,
+                selection,
+              );
+            },
+            onInlineMathTap: (segmentIndex) {
+              _editInlineMathAtSegment(segmentIndex);
+            },
+            onClose: () {
+              setState(() {
+                _showInlineWrappedEditor = false;
+              });
+            },
+            onChanged: () {
+              widget.controller.syncTextEditingValue(
+                widget.node.id,
+                _textController.value,
+              );
+            },
           )
         else
           Focus(
@@ -869,7 +910,14 @@ class _TextBlockEditorState extends State<_TextBlockEditor> {
       initialLatex: segment.inlineMathLatex!,
       initialDisplayMode: MathDisplayMode.inline,
     );
-    if (result == null || result.latex.trim().isEmpty) {
+    if (result == null) {
+      return;
+    }
+    if (result.delete) {
+      widget.controller.removeInlineMathSegment(widget.node.id, segmentIndex);
+      return;
+    }
+    if (result.latex.trim().isEmpty) {
       return;
     }
 
@@ -879,237 +927,6 @@ class _TextBlockEditorState extends State<_TextBlockEditor> {
       result.latex,
     );
   }
-}
-
-class _WrappedParagraphPreview extends StatelessWidget {
-  const _WrappedParagraphPreview({
-    required this.segments,
-    required this.textStyle,
-    required this.exclusionBands,
-  });
-
-  final List<TextSegment> segments;
-  final TextStyle textStyle;
-  final List<_FlowExclusionBand> exclusionBands;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final maxWidth = constraints.maxWidth.isFinite
-            ? constraints.maxWidth
-            : MediaQuery.sizeOf(context).width;
-        final lineHeight =
-            (textStyle.height ?? 1.4) * (textStyle.fontSize ?? 16.0);
-        final tokens = _tokenizeWrappedSegments(segments);
-        var tokenIndex = 0;
-        var currentTop = 0.0;
-        final rows = <Widget>[];
-        final sortedBands = [...exclusionBands]
-          ..sort((a, b) => a.top.compareTo(b.top));
-
-        while (tokenIndex < tokens.length) {
-          final activeBand = sortedBands
-              .where((band) {
-                return currentTop + lineHeight > band.top &&
-                    currentTop < band.bottom;
-              })
-              .cast<_FlowExclusionBand?>()
-              .firstWhere(
-                (band) => true,
-                orElse: () => null,
-              );
-
-          if (activeBand == null) {
-            final built = _buildWrappedLine(
-              tokens: tokens,
-              startIndex: tokenIndex,
-              width: maxWidth,
-              style: textStyle,
-            );
-            tokenIndex += built.consumed;
-            rows.add(_buildPreviewLine(built.tokens, Alignment.centerLeft));
-            currentTop += lineHeight;
-            continue;
-          }
-
-          final leftWidth = activeBand.blockedStart.clamp(0.0, maxWidth);
-          final rightWidth =
-              (maxWidth - activeBand.blockedEnd).clamp(0.0, maxWidth);
-          final leftBuilt = leftWidth > 48
-              ? _buildWrappedLine(
-                  tokens: tokens,
-                  startIndex: tokenIndex,
-                  width: leftWidth,
-                  style: textStyle,
-                )
-              : const _WrappedLineResult(<_WrappedPreviewToken>[], 0);
-          tokenIndex += leftBuilt.consumed;
-          final rightBuilt = rightWidth > 48
-              ? _buildWrappedLine(
-                  tokens: tokens,
-                  startIndex: tokenIndex,
-                  width: rightWidth,
-                  style: textStyle,
-                )
-              : const _WrappedLineResult(<_WrappedPreviewToken>[], 0);
-          tokenIndex += rightBuilt.consumed;
-
-          rows.add(
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: leftWidth,
-                  child:
-                      _buildPreviewLine(leftBuilt.tokens, Alignment.centerLeft),
-                ),
-                SizedBox(
-                  width: (activeBand.blockedEnd - activeBand.blockedStart)
-                      .clamp(0.0, maxWidth),
-                ),
-                SizedBox(
-                  width: rightWidth,
-                  child: _buildPreviewLine(
-                      rightBuilt.tokens, Alignment.centerLeft),
-                ),
-              ],
-            ),
-          );
-          currentTop += lineHeight;
-        }
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: rows,
-        );
-      },
-    );
-  }
-
-  Widget _buildPreviewLine(
-    List<_WrappedPreviewToken> tokens,
-    Alignment alignment,
-  ) {
-    return Align(
-      alignment: alignment,
-      child: Wrap(
-        spacing: 0,
-        runSpacing: 0,
-        children: [
-          for (final token in tokens)
-            token.isMath
-                ? Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 1),
-                    child: Math.tex(
-                      token.value,
-                      mathStyle: MathStyle.text,
-                      onErrorFallback: (error) => Text(
-                        token.value,
-                        style: textStyle,
-                      ),
-                    ),
-                  )
-                : Text(
-                    token.value,
-                    style: textStyle,
-                    softWrap: false,
-                    overflow: TextOverflow.clip,
-                  ),
-        ],
-      ),
-    );
-  }
-}
-
-class _WrappedPreviewToken {
-  const _WrappedPreviewToken({
-    required this.value,
-    required this.isMath,
-  });
-
-  final String value;
-  final bool isMath;
-}
-
-class _WrappedLineResult {
-  const _WrappedLineResult(this.tokens, this.consumed);
-
-  final List<_WrappedPreviewToken> tokens;
-  final int consumed;
-}
-
-_WrappedLineResult _buildWrappedLine({
-  required List<_WrappedPreviewToken> tokens,
-  required int startIndex,
-  required double width,
-  required TextStyle style,
-}) {
-  if (startIndex >= tokens.length || width <= 0) {
-    return const _WrappedLineResult(<_WrappedPreviewToken>[], 0);
-  }
-  final painter = TextPainter(
-    textDirection: TextDirection.ltr,
-    maxLines: 1,
-  );
-  final accepted = <_WrappedPreviewToken>[];
-  final buffer = StringBuffer();
-  var index = startIndex;
-  var consumed = 0;
-
-  while (index < tokens.length) {
-    final nextToken = tokens[index];
-    final nextText = buffer.isEmpty
-        ? nextToken.value
-        : '${buffer.toString()}${nextToken.value}';
-    painter.text = TextSpan(text: nextText, style: style);
-    painter.layout(maxWidth: width);
-    if (painter.didExceedMaxLines || painter.width > width) {
-      break;
-    }
-    buffer
-      ..clear()
-      ..write(nextText);
-    accepted.add(nextToken);
-    index += 1;
-    consumed += 1;
-  }
-
-  if (consumed == 0) {
-    return _WrappedLineResult(<_WrappedPreviewToken>[tokens[startIndex]], 1);
-  }
-  return _WrappedLineResult(accepted, consumed);
-}
-
-List<_WrappedPreviewToken> _tokenizeWrappedSegments(
-    List<TextSegment> segments) {
-  final tokens = <_WrappedPreviewToken>[];
-  for (final segment in segments) {
-    if (segment.isInlineMath) {
-      tokens.add(
-        _WrappedPreviewToken(
-          value: segment.inlineMathLatex!,
-          isMath: true,
-        ),
-      );
-      tokens.add(const _WrappedPreviewToken(value: ' ', isMath: false));
-      continue;
-    }
-    final matches = RegExp(r'\S+\s*').allMatches(segment.text);
-    if (matches.isEmpty && segment.text.isNotEmpty) {
-      tokens.add(_WrappedPreviewToken(value: segment.text, isMath: false));
-      continue;
-    }
-    for (final match in matches) {
-      tokens.add(
-        _WrappedPreviewToken(
-          value: match.group(0)!,
-          isMath: false,
-        ),
-      );
-    }
-  }
-  return tokens;
 }
 
 class _MathBlockEditor extends StatelessWidget {
@@ -1125,6 +942,10 @@ class _MathBlockEditor extends StatelessWidget {
       initialDisplayMode: node.displayMode,
     );
     if (result == null) {
+      return;
+    }
+    if (result.delete) {
+      controller.removeNode(node.id);
       return;
     }
     controller.updateMathNodeState(
@@ -1402,67 +1223,58 @@ class _ListItemEditorState extends State<_ListItemEditor> {
   Widget build(BuildContext context) {
     final showWrappedPreview = widget.exclusionBands.isNotEmpty;
     if (showWrappedPreview) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTap: () {
-              setState(() {
-                _showInlineWrappedEditor = true;
-              });
-              widget.controller.setActiveListItemSelection(
-                widget.node.id,
-                widget.itemIndex,
-                _textController.selection.isValid
-                    ? _textController.selection
-                    : const TextSelection.collapsed(offset: 0),
-              );
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!mounted) {
-                  return;
-                }
-                FocusScope.of(context).requestFocus(_focusNode);
-                SystemChannels.textInput.invokeMethod<void>('TextInput.show');
-              });
-            },
-            child: _WrappedParagraphPreview(
-              segments: widget.node.items[widget.itemIndex],
-              textStyle:
-                  Theme.of(context).textTheme.bodyLarge ?? const TextStyle(),
-              exclusionBands: widget.exclusionBands,
-            ),
-          ),
-          if (_showInlineWrappedEditor)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: _InlineWrappedEditorPanel(
-                title: 'Edit wrapped list item',
-                focusNode: _focusNode,
-                controller: _textController,
-                hintText: 'Edit wrapped list item',
-                onClose: () {
-                  setState(() {
-                    _showInlineWrappedEditor = false;
-                  });
-                },
-                onTap: () {
-                  widget.controller.setActiveListItemSelection(
-                    widget.node.id,
-                    widget.itemIndex,
-                    _textController.selection,
-                  );
-                },
-                onChanged: () {
-                  widget.controller.syncListItemEditingValue(
-                    widget.node.id,
-                    widget.itemIndex,
-                    _textController.value,
-                  );
-                },
-              ),
-            ),
-        ],
+      return WrappedEditableSurface(
+        segments: widget.node.items[widget.itemIndex],
+        previewTextStyle:
+            Theme.of(context).textTheme.bodyLarge ?? const TextStyle(),
+        exclusionBands: widget.exclusionBands,
+        isEditing: _showInlineWrappedEditor,
+        focusNode: _focusNode,
+        controller: _textController,
+        hintText: 'Edit wrapped list item',
+        onActivate: () {
+          if (!_showInlineWrappedEditor) {
+            setState(() {
+              _showInlineWrappedEditor = true;
+            });
+          }
+          widget.controller.setActiveListItemSelection(
+            widget.node.id,
+            widget.itemIndex,
+            _textController.selection.isValid
+                ? _textController.selection
+                : const TextSelection.collapsed(offset: 0),
+          );
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) {
+              return;
+            }
+            FocusScope.of(context).requestFocus(_focusNode);
+            SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+          });
+        },
+        onSelectionChanged: (selection) {
+          widget.controller.setActiveListItemSelection(
+            widget.node.id,
+            widget.itemIndex,
+            selection,
+          );
+        },
+        onInlineMathTap: (segmentIndex) {
+          _editInlineMathAtSegment(segmentIndex);
+        },
+        onClose: () {
+          setState(() {
+            _showInlineWrappedEditor = false;
+          });
+        },
+        onChanged: () {
+          widget.controller.syncListItemEditingValue(
+            widget.node.id,
+            widget.itemIndex,
+            _textController.value,
+          );
+        },
       );
     }
     return Focus(
@@ -1517,7 +1329,18 @@ class _ListItemEditorState extends State<_ListItemEditor> {
       initialLatex: segment.inlineMathLatex!,
       initialDisplayMode: MathDisplayMode.inline,
     );
-    if (result == null || result.latex.trim().isEmpty) {
+    if (result == null) {
+      return;
+    }
+    if (result.delete) {
+      widget.controller.removeListInlineMathSegment(
+        widget.node.id,
+        widget.itemIndex,
+        segmentIndex,
+      );
+      return;
+    }
+    if (result.latex.trim().isEmpty) {
       return;
     }
     widget.controller.updateListInlineMathSegment(
@@ -1539,13 +1362,14 @@ class _ImageBlockEditor extends StatefulWidget {
   State<_ImageBlockEditor> createState() => _ImageBlockEditorState();
 }
 
-class _FloatingImageOverlay extends StatelessWidget {
+class _FloatingImageOverlay extends StatefulWidget {
   const _FloatingImageOverlay({
     required this.controller,
     required this.node,
     required this.viewportSize,
     required this.padding,
     required this.anchorRect,
+    required this.onResolveAnchorId,
   });
 
   final RichTextEditorController controller;
@@ -1553,115 +1377,405 @@ class _FloatingImageOverlay extends StatelessWidget {
   final Size viewportSize;
   final EdgeInsets padding;
   final Rect? anchorRect;
+  final String? Function(Rect rect) onResolveAnchorId;
+
+  @override
+  State<_FloatingImageOverlay> createState() => _FloatingImageOverlayState();
+}
+
+class _FloatingImageOverlayState extends State<_FloatingImageOverlay> {
+  static const double _snapThreshold = 12;
+
+  late double _rawX;
+  late double _rawY;
+  late double _x;
+  late double _y;
+  late double _width;
+  late double _height;
+  bool _snapLeft = false;
+  bool _snapRight = false;
+  bool _snapTop = false;
+  bool _snapBottom = false;
+  bool _snapCenterX = false;
+  bool _snapCenterY = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncFromWidget();
+  }
+
+  @override
+  void didUpdateWidget(covariant _FloatingImageOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.node != widget.node ||
+        oldWidget.anchorRect != widget.anchorRect) {
+      _syncFromWidget();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final width =
-        (node.width ?? 280.0).clamp(_kMinImageWidth, 720.0).toDouble();
-    final height = (node.height ?? (width * 0.72))
-        .clamp(_kMinImageHeight, 720.0)
-        .toDouble();
-    final baseLeft = anchorRect?.left ?? padding.left;
-    final baseTop = anchorRect?.top ?? padding.top;
-    final minLeft = padding.left;
-    final minTop = padding.top;
-    final maxLeft = (viewportSize.width - padding.right - width)
+    final baseLeft = widget.anchorRect?.left ?? widget.padding.left;
+    final baseTop = widget.anchorRect?.top ?? widget.padding.top;
+    final minLeft = widget.padding.left;
+    final minTop = widget.padding.top;
+    final maxLeft = (widget.viewportSize.width - widget.padding.right - _width)
         .clamp(minLeft, double.infinity)
         .toDouble();
-    final maxTop = (viewportSize.height - padding.bottom - height)
-        .clamp(minTop, double.infinity)
-        .toDouble();
-    final left = (baseLeft + node.x).clamp(minLeft, maxLeft).toDouble();
-    final top = (baseTop + node.y).clamp(minTop, maxTop).toDouble();
-    final isSelected = controller.selectedNodeId == node.id;
+    final maxTop =
+        (widget.viewportSize.height - widget.padding.bottom - _height)
+            .clamp(minTop, double.infinity)
+            .toDouble();
+    final left = (baseLeft + _x).clamp(minLeft, maxLeft).toDouble();
+    final top = (baseTop + _y).clamp(minTop, maxTop).toDouble();
+    final isSelected = widget.controller.selectedNodeId == widget.node.id;
 
     return Positioned(
       left: left,
       top: top,
-      width: width,
-      height: height,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => controller.selectNode(node.id),
-        onPanStart: (_) => controller.selectNode(node.id),
-        onPanUpdate: (details) {
-          controller.updateFloatingImageGeometry(
-            node.id,
-            x: node.x + details.delta.dx,
-            y: node.y + details.delta.dy,
-          );
-        },
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: isSelected
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.outlineVariant,
-                    width: isSelected ? 2 : 1,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(11),
-                  child: _EditorImage(
-                    url: node.url,
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
+      width: _width,
+      height: _height,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (_snapLeft) _GuideLine.vertical(x: -left + widget.padding.left),
+          if (_snapRight)
+            _GuideLine.vertical(
+              x: widget.viewportSize.width - left - widget.padding.right,
             ),
-            if (isSelected)
-              Positioned(
-                right: -14,
-                bottom: -14,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanStart: (_) => controller.selectNode(node.id),
-                  onPanUpdate: (details) {
-                    final nextWidth = (width + details.delta.dx).clamp(
-                      _kMinImageWidth,
-                      viewportSize.width - padding.horizontal,
-                    );
-                    final nextHeight = (height + details.delta.dy).clamp(
-                      _kMinImageHeight,
-                      viewportSize.height - padding.vertical,
-                    );
-                    controller.updateFloatingImageGeometry(
-                      node.id,
-                      width: nextWidth,
-                      height: nextHeight,
-                    );
-                  },
-                  child: Container(
-                    width: 36,
-                    height: 36,
+          if (_snapCenterX)
+            _GuideLine.vertical(
+              x: (widget.viewportSize.width / 2) - left,
+            ),
+          if (_snapTop) _GuideLine.horizontal(y: -top + widget.padding.top),
+          if (_snapBottom)
+            _GuideLine.horizontal(
+              y: widget.viewportSize.height - top - widget.padding.bottom,
+            ),
+          if (_snapCenterY)
+            _GuideLine.horizontal(
+              y: (widget.viewportSize.height / 2) - top,
+            ),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => widget.controller.selectNode(widget.node.id),
+            onDoubleTap: () => _editImage(context),
+            onPanStart: (_) => widget.controller.selectNode(widget.node.id),
+            onPanUpdate: (details) {
+              widget.controller.selectNode(widget.node.id);
+              setState(() {
+                _rawX += details.delta.dx;
+                _rawY += details.delta.dy;
+                _x = _rawX;
+                _y = _rawY;
+                _applySnapping(baseLeft, baseTop);
+              });
+            },
+            onPanEnd: (_) => _commitGeometry(),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned.fill(
+                  child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.shadow.withValues(alpha: 0.24),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
+                      border: Border.all(
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.outlineVariant,
+                        width: isSelected ? 2 : 1,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      color:
+                          Theme.of(context).colorScheme.surfaceContainerHighest,
                     ),
-                    child: Icon(
-                      Icons.open_in_full,
-                      size: 18,
-                      color: Theme.of(context).colorScheme.onPrimary,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(11),
+                      child: Transform.rotate(
+                        angle: widget.node.rotationDegrees * math.pi / 180,
+                        child: _EditorImage(
+                          url: widget.node.url,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-          ],
+                if (isSelected)
+                  Positioned(
+                    left: -12,
+                    top: -12,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _editImage(context),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .shadow
+                                  .withValues(alpha: 0.2),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.edit_outlined,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.onPrimary,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (isSelected)
+                  Positioned(
+                    right: -12,
+                    top: -12,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => widget.controller.removeNode(widget.node.id),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.error,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .shadow
+                                  .withValues(alpha: 0.2),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.close,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.onError,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (isSelected)
+                  Positioned(
+                    right: -14,
+                    bottom: -14,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanStart: (_) =>
+                          widget.controller.selectNode(widget.node.id),
+                      onPanUpdate: (details) {
+                        setState(() {
+                          _width = (_width + details.delta.dx).clamp(
+                            _kMinImageWidth,
+                            widget.viewportSize.width -
+                                widget.padding.horizontal,
+                          );
+                          _height = (_height + details.delta.dy).clamp(
+                            _kMinImageHeight,
+                            widget.viewportSize.height -
+                                widget.padding.vertical,
+                          );
+                        });
+                      },
+                      onPanEnd: (_) => _commitGeometry(),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .shadow
+                                  .withValues(alpha: 0.24),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.open_in_full,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.onPrimary,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _syncFromWidget() {
+    _rawX = widget.node.x;
+    _rawY = widget.node.y;
+    _x = widget.node.x;
+    _y = widget.node.y;
+    _width =
+        (widget.node.width ?? 280.0).clamp(_kMinImageWidth, 720.0).toDouble();
+    _height = (widget.node.height ?? (_width * 0.72))
+        .clamp(_kMinImageHeight, 720.0)
+        .toDouble();
+    _clearSnapFlags();
+  }
+
+  void _applySnapping(double baseLeft, double baseTop) {
+    _clearSnapFlags();
+    _x = _rawX;
+    _y = _rawY;
+    final imageLeft = baseLeft + _x;
+    final imageTop = baseTop + _y;
+    final imageRight = imageLeft + _width;
+    final imageBottom = imageTop + _height;
+    final imageCenterX = imageLeft + (_width / 2);
+    final imageCenterY = imageTop + (_height / 2);
+    final leftGuide = widget.padding.left;
+    final rightGuide = widget.viewportSize.width - widget.padding.right;
+    final topGuide = widget.padding.top;
+    final bottomGuide = widget.viewportSize.height - widget.padding.bottom;
+    final centerXGuide = widget.viewportSize.width / 2;
+    final centerYGuide = widget.viewportSize.height / 2;
+
+    if ((imageLeft - leftGuide).abs() <= _snapThreshold) {
+      _x = leftGuide - baseLeft;
+      _snapLeft = true;
+    } else if ((imageRight - rightGuide).abs() <= _snapThreshold) {
+      _x = rightGuide - baseLeft - _width;
+      _snapRight = true;
+    } else if ((imageCenterX - centerXGuide).abs() <= _snapThreshold) {
+      _x = centerXGuide - baseLeft - (_width / 2);
+      _snapCenterX = true;
+    }
+
+    if ((imageTop - topGuide).abs() <= _snapThreshold) {
+      _y = topGuide - baseTop;
+      _snapTop = true;
+    } else if ((imageBottom - bottomGuide).abs() <= _snapThreshold) {
+      _y = bottomGuide - baseTop - _height;
+      _snapBottom = true;
+    } else if ((imageCenterY - centerYGuide).abs() <= _snapThreshold) {
+      _y = centerYGuide - baseTop - (_height / 2);
+      _snapCenterY = true;
+    }
+  }
+
+  void _clearSnapFlags() {
+    _snapLeft = false;
+    _snapRight = false;
+    _snapTop = false;
+    _snapBottom = false;
+    _snapCenterX = false;
+    _snapCenterY = false;
+  }
+
+  void _commitGeometry() {
+    final baseLeft = widget.anchorRect?.left ?? widget.padding.left;
+    final baseTop = widget.anchorRect?.top ?? widget.padding.top;
+    final floatingRect =
+        Rect.fromLTWH(baseLeft + _x, baseTop + _y, _width, _height);
+    widget.controller.updateFloatingImageGeometry(
+      widget.node.id,
+      x: _x,
+      y: _y,
+      width: _width,
+      height: _height,
+      anchorBlockId: widget.onResolveAnchorId(floatingRect),
+    );
+    _rawX = _x;
+    _rawY = _y;
+  }
+
+  Future<void> _editImage(BuildContext context) async {
+    final result = await showDialog<_ImageDialogResult>(
+      context: context,
+      builder: (context) => _ImageDialog(
+        initialUrl: widget.node.url,
+        initialAltText: widget.node.altText,
+        initialWidth: _width,
+        initialHeight: _height,
+        initialLayoutMode: widget.node.layoutMode,
+        initialTextWrapMode: widget.node.textWrapMode,
+        initialX: _x,
+        initialY: _y,
+        initialZIndex: widget.node.zIndex,
+        initialRotationDegrees: widget.node.rotationDegrees,
+        initialAnchorBlockId: widget.node.anchorBlockId,
+        initialWrapText: widget.node.wrapText,
+        initialWrapAlignment: widget.node.wrapAlignment,
+      ),
+    );
+    if (result == null) {
+      return;
+    }
+    if (result.delete) {
+      widget.controller.removeNode(widget.node.id);
+      return;
+    }
+    if (result.url.trim().isEmpty) {
+      return;
+    }
+    widget.controller.updateImageNode(
+      widget.node.id,
+      url: result.url.trim(),
+      altText: result.altText.trim(),
+      width: result.width,
+      height: result.height,
+      layoutMode: result.layoutMode,
+      textWrapMode: result.textWrapMode,
+      x: result.x,
+      y: result.y,
+      zIndex: result.zIndex,
+      rotationDegrees: result.rotationDegrees,
+      anchorBlockId: result.anchorBlockId,
+      wrapText: result.wrapText,
+      wrapAlignment: result.wrapAlignment,
+    );
+  }
+}
+
+class _GuideLine extends StatelessWidget {
+  const _GuideLine.vertical({required this.x})
+      : y = null,
+        vertical = true;
+
+  const _GuideLine.horizontal({required this.y})
+      : x = null,
+        vertical = false;
+
+  final double? x;
+  final double? y;
+  final bool vertical;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: vertical ? x : 0,
+      top: vertical ? 0 : y,
+      width: vertical ? 1 : null,
+      height: vertical ? null : 1,
+      right: vertical ? null : 0,
+      bottom: vertical ? 0 : null,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color:
+                Theme.of(context).colorScheme.primary.withValues(alpha: 0.45),
+          ),
         ),
       ),
     );
@@ -1712,12 +1826,20 @@ class _ImageBlockEditorState extends State<_ImageBlockEditor> {
             initialX: node.x,
             initialY: node.y,
             initialZIndex: node.zIndex,
+            initialRotationDegrees: node.rotationDegrees,
             initialAnchorBlockId: node.anchorBlockId,
             initialWrapText: node.wrapText,
             initialWrapAlignment: node.wrapAlignment,
           ),
         );
-        if (result == null || result.url.trim().isEmpty) {
+        if (result == null) {
+          return;
+        }
+        if (result.delete) {
+          controller.removeNode(node.id);
+          return;
+        }
+        if (result.url.trim().isEmpty) {
           return;
         }
         controller.updateImageNode(
@@ -1731,6 +1853,7 @@ class _ImageBlockEditorState extends State<_ImageBlockEditor> {
           x: result.x,
           y: result.y,
           zIndex: result.zIndex,
+          rotationDegrees: result.rotationDegrees,
           anchorBlockId: result.anchorBlockId,
           wrapText: result.wrapText,
           wrapAlignment: result.wrapAlignment,
@@ -1742,9 +1865,12 @@ class _ImageBlockEditorState extends State<_ImageBlockEditor> {
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
           ),
-          child: _EditorImage(
-            url: node.url,
-            fit: BoxFit.contain,
+          child: Transform.rotate(
+            angle: node.rotationDegrees * math.pi / 180,
+            child: _EditorImage(
+              url: node.url,
+              fit: BoxFit.contain,
+            ),
           ),
         ),
       ),
@@ -1878,7 +2004,17 @@ class _ImageBlockEditorState extends State<_ImageBlockEditor> {
       initialLatex: segment.inlineMathLatex!,
       initialDisplayMode: MathDisplayMode.inline,
     );
-    if (result == null || result.latex.trim().isEmpty) {
+    if (result == null) {
+      return;
+    }
+    if (result.delete) {
+      widget.controller.removeImageWrapInlineMathSegment(
+        widget.node.id,
+        segmentIndex,
+      );
+      return;
+    }
+    if (result.latex.trim().isEmpty) {
       return;
     }
     widget.controller.updateImageWrapInlineMathSegment(
@@ -1900,6 +2036,7 @@ class _ImageDialog extends StatefulWidget {
     this.initialX = 0,
     this.initialY = 0,
     this.initialZIndex = 0,
+    this.initialRotationDegrees = 0,
     this.initialAnchorBlockId,
     this.initialWrapText = '',
     this.initialWrapAlignment = ImageWrapAlignment.none,
@@ -1914,6 +2051,7 @@ class _ImageDialog extends StatefulWidget {
   final double initialX;
   final double initialY;
   final int initialZIndex;
+  final double initialRotationDegrees;
   final String? initialAnchorBlockId;
   final String initialWrapText;
   final ImageWrapAlignment initialWrapAlignment;
@@ -1933,6 +2071,7 @@ class _ImageDialogState extends State<_ImageDialog> {
   late double _x;
   late double _y;
   late int _zIndex;
+  late double _rotationDegrees;
   late String? _anchorBlockId;
   late ImageWrapAlignment _wrapAlignment;
 
@@ -1949,6 +2088,7 @@ class _ImageDialogState extends State<_ImageDialog> {
     _x = widget.initialX;
     _y = widget.initialY;
     _zIndex = widget.initialZIndex;
+    _rotationDegrees = widget.initialRotationDegrees;
     _anchorBlockId = widget.initialAnchorBlockId;
     _wrapAlignment = widget.initialWrapAlignment;
   }
@@ -2011,6 +2151,74 @@ class _ImageDialogState extends State<_ImageDialog> {
                         .clamp(_kMinImageHeight, 720.0);
                   });
                 },
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Rotation: ${_rotationDegrees.round()}°',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        _rotationDegrees =
+                            (_rotationDegrees - 90).clamp(-180.0, 180.0);
+                      });
+                    },
+                    icon: const Icon(Icons.rotate_left),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        _rotationDegrees =
+                            (_rotationDegrees + 90).clamp(-180.0, 180.0);
+                      });
+                    },
+                    icon: const Icon(Icons.rotate_right),
+                  ),
+                ],
+              ),
+              Slider(
+                value: _rotationDegrees,
+                min: -180,
+                max: 180,
+                divisions: 24,
+                label: '${_rotationDegrees.round()}°',
+                onChanged: (value) {
+                  setState(() {
+                    _rotationDegrees = value;
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Layer: $_zIndex',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        _zIndex = (_zIndex - 1).clamp(-20, 20);
+                      });
+                    },
+                    icon: const Icon(Icons.vertical_align_bottom),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        _zIndex = (_zIndex + 1).clamp(-20, 20);
+                      });
+                    },
+                    icon: const Icon(Icons.vertical_align_top),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
               SingleChildScrollView(
@@ -2119,9 +2327,12 @@ class _ImageDialogState extends State<_ImageDialog> {
                         alignment: Alignment.center,
                         child: SizedBox(
                           width: previewWidth,
-                          child: _EditorImage(
-                            url: _urlController.text.trim(),
-                            fit: BoxFit.contain,
+                          child: Transform.rotate(
+                            angle: _rotationDegrees * math.pi / 180,
+                            child: _EditorImage(
+                              url: _urlController.text.trim(),
+                              fit: BoxFit.contain,
+                            ),
                           ),
                         ),
                       ),
@@ -2134,6 +2345,13 @@ class _ImageDialogState extends State<_ImageDialog> {
         ),
       ),
       actions: [
+        if (widget.initialUrl.trim().isNotEmpty)
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(const _ImageDialogResult.delete());
+            },
+            child: const Text('Delete'),
+          ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
@@ -2151,6 +2369,7 @@ class _ImageDialogState extends State<_ImageDialog> {
                 x: _x,
                 y: _y,
                 zIndex: _zIndex,
+                rotationDegrees: _rotationDegrees,
                 anchorBlockId: _anchorBlockId,
                 wrapText: _wrapTextController.text,
                 wrapAlignment: _wrapAlignment,
@@ -2199,10 +2418,27 @@ class _ImageDialogResult {
     required this.x,
     required this.y,
     required this.zIndex,
+    required this.rotationDegrees,
     required this.anchorBlockId,
     required this.wrapText,
     required this.wrapAlignment,
-  });
+  }) : delete = false;
+
+  const _ImageDialogResult.delete()
+      : url = '',
+        altText = '',
+        width = 0,
+        height = 0,
+        layoutMode = ImageLayoutMode.floating,
+        textWrapMode = ImageTextWrap.around,
+        x = 0,
+        y = 0,
+        zIndex = 0,
+        rotationDegrees = 0,
+        anchorBlockId = null,
+        wrapText = '',
+        wrapAlignment = ImageWrapAlignment.none,
+        delete = true;
 
   final String url;
   final String altText;
@@ -2213,9 +2449,11 @@ class _ImageDialogResult {
   final double x;
   final double y;
   final int zIndex;
+  final double rotationDegrees;
   final String? anchorBlockId;
   final String wrapText;
   final ImageWrapAlignment wrapAlignment;
+  final bool delete;
 }
 
 class _EditorImage extends StatelessWidget {
