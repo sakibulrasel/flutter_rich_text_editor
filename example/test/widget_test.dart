@@ -7,14 +7,13 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:rich_text_editor_example/main.dart';
+import '../lib/main.dart';
 
 void main() {
   testWidgets('demo screen renders', (WidgetTester tester) async {
     await tester.pumpWidget(const DemoApp());
 
     expect(find.text('Rich Text Editor Feature Demo'), findsOneWidget);
-    expect(find.text('JSON'), findsOneWidget);
-    expect(find.text('HTML'), findsOneWidget);
+    expect(find.text('Submit'), findsOneWidget);
   });
 }

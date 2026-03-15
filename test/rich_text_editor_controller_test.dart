@@ -172,6 +172,56 @@ void main() {
     expect(html, contains('<strong>Heyllo</strong> world'));
   });
 
+  test('collapsed bold toggle applies to subsequently typed text', () {
+    final controller = RichTextEditorController();
+
+    controller.setActiveTextSelection(
+      'node_0',
+      const TextSelection.collapsed(offset: 0),
+    );
+    controller.applyBoldToSelection();
+
+    controller.syncTextEditingValue(
+      'node_0',
+      const TextEditingValue(
+        text: 'Bold',
+        selection: TextSelection.collapsed(offset: 4),
+      ),
+    );
+
+    expect(controller.toHtmlString(), '<p><strong>Bold</strong></p>');
+    expect(controller.isBoldActive, isTrue);
+  });
+
+  test('collapsed bold toggle can be turned off for subsequent typing', () {
+    final controller = RichTextEditorController();
+
+    controller.setActiveTextSelection(
+      'node_0',
+      const TextSelection.collapsed(offset: 0),
+    );
+    controller.applyBoldToSelection();
+    controller.syncTextEditingValue(
+      'node_0',
+      const TextEditingValue(
+        text: 'Bold',
+        selection: TextSelection.collapsed(offset: 4),
+      ),
+    );
+
+    controller.applyBoldToSelection();
+    controller.syncTextEditingValue(
+      'node_0',
+      const TextEditingValue(
+        text: 'Bold plain',
+        selection: TextSelection.collapsed(offset: 10),
+      ),
+    );
+
+    expect(controller.toHtmlString(), '<p><strong>Bold</strong> plain</p>');
+    expect(controller.isBoldActive, isFalse);
+  });
+
   test('formatted segments survive deletion', () {
     final controller = RichTextEditorController();
 
@@ -211,6 +261,40 @@ void main() {
 
     expect(json, contains(r'"inlineMathLatex": "\\pi r^2"'));
     expect(html, contains('<p>Area = <span data-node="math-inline"'));
+    expect(html, contains(r'\(\pi r^2\)'));
+  });
+
+  test('controller can export standalone html document with mathjax', () {
+    final controller = RichTextEditorController();
+
+    controller.updateTextNode('node_0', 'Area = ');
+    controller.setActiveTextSelection(
+      'node_0',
+      const TextSelection.collapsed(offset: 7),
+    );
+    controller.insertInlineMathToActiveText(r'\pi r^2');
+
+    final htmlDocument = controller.toHtmlDocumentString(title: 'Preview');
+
+    expect(htmlDocument, contains('<!DOCTYPE html>'));
+    expect(htmlDocument, contains('MathJax'));
+    expect(htmlDocument, contains(r'\(\pi r^2\)'));
+    expect(htmlDocument, contains('<title>Preview</title>'));
+  });
+
+  test('controller can export embeddable html snippet', () {
+    final controller = RichTextEditorController();
+
+    controller.updateTextNode('node_0', 'Hello');
+
+    final snippet = controller.toEmbeddableHtmlString(
+      attributes: const {'data-id': 'post-1'},
+    );
+
+    expect(snippet, contains('class="rte-viewer"'));
+    expect(snippet, contains('data-rich-text-json="'));
+    expect(snippet, contains('data-id="post-1"'));
+    expect(snippet, contains('&quot;nodes&quot;'));
   });
 
   test('inline math can be inserted between existing text', () {
@@ -228,7 +312,7 @@ void main() {
     expect(node.plainText, 'ab${TextSegment.inlineMathPlaceholder}ef');
     expect(controller.toHtmlString(),
         contains('<p>ab<span data-node="math-inline"'));
-    expect(controller.toHtmlString(), contains('></span>ef</p>'));
+    expect(controller.toHtmlString(), contains(r'>\(c+d\)</span>ef</p>'));
   });
 
   test('inline math can be inserted with an explicit saved selection', () {

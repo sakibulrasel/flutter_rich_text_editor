@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Renderer Demo</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f8fafc;
+      }
+      #viewer {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 24px;
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+      }
+    </style>
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [['\\(', '\\)']],
+          displayMath: [['\\[', '\\]']]
+        }
+      };
+    </script>
+    <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  </head>
+  <body>
+    <div id="viewer"></div>
+    <script type="module">
+      import { renderRichTextDocument } from '../dist/index.js';
+
+      const documentModel = {
+        version: 1,
+        nodes: [
+          {
+            type: 'textBlock',
+            id: 'heading',
+            style: 'heading1',
+            segments: [{ text: 'Renderer Demo', bold: false, italic: false, underline: false, link: null, inlineMathLatex: null }]
+          },
+          {
+            type: 'textBlock',
+            id: 'body',
+            style: 'paragraph',
+            segments: [
+              { text: 'This is a ', bold: false, italic: false, underline: false, link: null, inlineMathLatex: null },
+              { text: 'browser', bold: true, italic: false, underline: false, link: null, inlineMathLatex: null },
+              { text: ' renderer with inline math ', bold: false, italic: false, underline: false, link: null, inlineMathLatex: null },
+              { text: '', bold: false, italic: false, underline: false, link: null, inlineMathLatex: '\\frac{a+b}{c}' },
+              { text: ' and wrapped content.', bold: false, italic: false, underline: false, link: null, inlineMathLatex: null }
+            ]
+          },
+          {
+            type: 'image',
+            id: 'floating',
+            url: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80',
+            altText: 'Demo floating image',
+            width: 220,
+            height: 150,
+            layoutMode: 'floating',
+            textWrapMode: 'around',
+            x: 360,
+            y: -10,
+            zIndex: 1,
+            rotationDegrees: 0,
+            anchorBlockId: 'body',
+            wrapText: '',
+            wrapSegments: [{ text: '' }],
+            wrapAlignment: 'none'
+          },
+          {
+            type: 'textBlock',
+            id: 'body-2',
+            style: 'paragraph',
+            segments: [
+              { text: 'Floating images use the same JSON shape as the Flutter editor. This paragraph should wrap around the image in the browser renderer.', bold: false, italic: false, underline: false, link: null, inlineMathLatex: null }
+            ]
+          }
+        ]
+      };
+
+      renderRichTextDocument({
+        element: document.getElementById('viewer'),
+        document: documentModel,
+      });
+    </script>
+  </body>
+  </html>

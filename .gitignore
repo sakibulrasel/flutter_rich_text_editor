@@ -1,0 +1,24 @@
+# macOS / editor noise
+.DS_Store
+.git ignore
+*.log
+*.swp
+*.swo
+
+# Dart / Flutter generated files
+.dart_tool/
+.flutter-plugins-dependencies
+build/
+coverage/
+
+# Package manager caches
+.pub/
+.pub-cache/
+
+# IDE folders
+.idea/
+
+# JS renderer generated files
+renderer/node_modules/
+renderer/dist/
+renderer/.idea/

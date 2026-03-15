@@ -12,6 +12,7 @@ dependencies:
     sdk: flutter
   rich_text_editor:
     path: ../
+  webview_flutter: ^4.13.1
 
 dev_dependencies:
   flutter_test:

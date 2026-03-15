@@ -534,24 +534,27 @@ class _EditorToolbar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             IconButton(
-              onPressed: controller.activeSelection.isValid &&
-                      !controller.activeSelection.isCollapsed
+              isSelected: controller.isBoldActive,
+              onPressed: controller.activeTextNodeId != null ||
+                      controller.activeListNodeId != null
                   ? controller.applyBoldToSelection
                   : null,
               icon: const Icon(Icons.format_bold),
               tooltip: 'Bold',
             ),
             IconButton(
-              onPressed: controller.activeSelection.isValid &&
-                      !controller.activeSelection.isCollapsed
+              isSelected: controller.isItalicActive,
+              onPressed: controller.activeTextNodeId != null ||
+                      controller.activeListNodeId != null
                   ? controller.applyItalicToSelection
                   : null,
               icon: const Icon(Icons.format_italic),
               tooltip: 'Italic',
             ),
             IconButton(
-              onPressed: controller.activeSelection.isValid &&
-                      !controller.activeSelection.isCollapsed
+              isSelected: controller.isUnderlineActive,
+              onPressed: controller.activeTextNodeId != null ||
+                      controller.activeListNodeId != null
                   ? controller.applyUnderlineToSelection
                   : null,
               icon: const Icon(Icons.format_underline),
@@ -1418,17 +1421,8 @@ class _FloatingImageOverlayState extends State<_FloatingImageOverlay> {
   Widget build(BuildContext context) {
     final baseLeft = widget.anchorRect?.left ?? widget.padding.left;
     final baseTop = widget.anchorRect?.top ?? widget.padding.top;
-    final minLeft = widget.padding.left;
-    final minTop = widget.padding.top;
-    final maxLeft = (widget.viewportSize.width - widget.padding.right - _width)
-        .clamp(minLeft, double.infinity)
-        .toDouble();
-    final maxTop =
-        (widget.viewportSize.height - widget.padding.bottom - _height)
-            .clamp(minTop, double.infinity)
-            .toDouble();
-    final left = (baseLeft + _x).clamp(minLeft, maxLeft).toDouble();
-    final top = (baseTop + _y).clamp(minTop, maxTop).toDouble();
+    final left = baseLeft + _x;
+    final top = baseTop + _y;
     final isSelected = widget.controller.selectedNodeId == widget.node.id;
 
     return Positioned(
@@ -1812,6 +1806,8 @@ class _ImageBlockEditorState extends State<_ImageBlockEditor> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final node = widget.node;
+    final insertionIndex =
+        controller.nodes.indexWhere((candidate) => candidate.id == node.id) + 1;
     final imageWidget = GestureDetector(
       onDoubleTap: () async {
         final result = await showDialog<_ImageDialogResult>(
@@ -1983,6 +1979,20 @@ class _ImageBlockEditorState extends State<_ImageBlockEditor> {
               Text(
                 node.altText,
                 style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            if (node.layoutMode != ImageLayoutMode.floating) ...[
+              const SizedBox(height: 8),
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () {
+                  controller.selectNode(node.id);
+                  controller.insertParagraph(index: insertionIndex);
+                },
+                child: const SizedBox(
+                  width: double.infinity,
+                  height: 28,
+                ),
               ),
             ],
           ],
