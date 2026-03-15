@@ -21,6 +21,8 @@ class ImageNode extends EditorNode {
     this.zIndex = 0,
     this.rotationDegrees = 0,
     this.anchorBlockId,
+    this.anchorTextOffset,
+    this.anchorListItemIndex,
     this.wrapSegments = const [TextSegment(text: '')],
     this.wrapAlignment = ImageWrapAlignment.none,
   });
@@ -38,6 +40,8 @@ class ImageNode extends EditorNode {
   final int zIndex;
   final double rotationDegrees;
   final String? anchorBlockId;
+  final int? anchorTextOffset;
+  final int? anchorListItemIndex;
   final List<TextSegment> wrapSegments;
   final ImageWrapAlignment wrapAlignment;
 
@@ -59,6 +63,8 @@ class ImageNode extends EditorNode {
     int? zIndex,
     double? rotationDegrees,
     String? anchorBlockId,
+    int? anchorTextOffset,
+    int? anchorListItemIndex,
     List<TextSegment>? wrapSegments,
     ImageWrapAlignment? wrapAlignment,
   }) {
@@ -75,6 +81,8 @@ class ImageNode extends EditorNode {
       zIndex: zIndex ?? this.zIndex,
       rotationDegrees: rotationDegrees ?? this.rotationDegrees,
       anchorBlockId: anchorBlockId ?? this.anchorBlockId,
+      anchorTextOffset: anchorTextOffset ?? this.anchorTextOffset,
+      anchorListItemIndex: anchorListItemIndex ?? this.anchorListItemIndex,
       wrapSegments: List<TextSegment>.unmodifiable(
         wrapSegments ?? this.wrapSegments,
       ),
@@ -102,6 +110,8 @@ class ImageNode extends EditorNode {
       zIndex: (json['zIndex'] as num?)?.toInt() ?? 0,
       rotationDegrees: (json['rotationDegrees'] as num?)?.toDouble() ?? 0,
       anchorBlockId: json['anchorBlockId'] as String?,
+      anchorTextOffset: (json['anchorTextOffset'] as num?)?.toInt(),
+      anchorListItemIndex: (json['anchorListItemIndex'] as num?)?.toInt(),
       wrapSegments: List<TextSegment>.unmodifiable(
         ((json['wrapSegments'] as List<dynamic>?) ??
                 <dynamic>[
@@ -133,6 +143,8 @@ class ImageNode extends EditorNode {
       'zIndex': zIndex,
       'rotationDegrees': rotationDegrees,
       'anchorBlockId': anchorBlockId,
+      'anchorTextOffset': anchorTextOffset,
+      'anchorListItemIndex': anchorListItemIndex,
       'wrapText': wrapText,
       'wrapSegments': wrapSegments.map((segment) => segment.toJson()).toList(),
       'wrapAlignment': wrapAlignment.name,

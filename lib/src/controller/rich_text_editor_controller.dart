@@ -825,6 +825,8 @@ class RichTextEditorController extends ChangeNotifier {
     int zIndex = 0,
     double rotationDegrees = 0,
     String? anchorBlockId,
+    int? anchorTextOffset,
+    int? anchorListItemIndex,
     String wrapText = '',
     List<TextSegment>? wrapSegments,
     ImageWrapAlignment wrapAlignment = ImageWrapAlignment.none,
@@ -845,6 +847,8 @@ class RichTextEditorController extends ChangeNotifier {
       zIndex: zIndex,
       rotationDegrees: rotationDegrees,
       anchorBlockId: anchorBlockId,
+      anchorTextOffset: anchorTextOffset,
+      anchorListItemIndex: anchorListItemIndex,
       wrapSegments: wrapSegments ?? <TextSegment>[TextSegment(text: wrapText)],
       wrapAlignment: wrapAlignment,
     );
@@ -872,6 +876,8 @@ class RichTextEditorController extends ChangeNotifier {
     int? zIndex,
     double? rotationDegrees,
     String? anchorBlockId,
+    int? anchorTextOffset,
+    int? anchorListItemIndex,
     String? wrapText,
     List<TextSegment>? wrapSegments,
     ImageWrapAlignment? wrapAlignment,
@@ -890,6 +896,8 @@ class RichTextEditorController extends ChangeNotifier {
         zIndex: zIndex,
         rotationDegrees: rotationDegrees,
         anchorBlockId: anchorBlockId,
+        anchorTextOffset: anchorTextOffset,
+        anchorListItemIndex: anchorListItemIndex,
         wrapSegments: wrapSegments ??
             (wrapText != null ? [TextSegment(text: wrapText)] : null),
         wrapAlignment: wrapAlignment,
@@ -906,6 +914,8 @@ class RichTextEditorController extends ChangeNotifier {
     int? zIndex,
     double? rotationDegrees,
     String? anchorBlockId,
+    int? anchorTextOffset,
+    int? anchorListItemIndex,
   }) {
     final index = nodes.indexWhere((node) => node.id == id);
     if (index == -1) {
@@ -921,7 +931,11 @@ class RichTextEditorController extends ChangeNotifier {
         (y == null || y == node.y) &&
         (zIndex == null || zIndex == node.zIndex) &&
         (rotationDegrees == null || rotationDegrees == node.rotationDegrees) &&
-        (anchorBlockId == null || anchorBlockId == node.anchorBlockId)) {
+        (anchorBlockId == null || anchorBlockId == node.anchorBlockId) &&
+        (anchorTextOffset == null ||
+            anchorTextOffset == node.anchorTextOffset) &&
+        (anchorListItemIndex == null ||
+            anchorListItemIndex == node.anchorListItemIndex)) {
       return;
     }
     _replaceNode(
@@ -934,9 +948,31 @@ class RichTextEditorController extends ChangeNotifier {
         zIndex: zIndex,
         rotationDegrees: rotationDegrees,
         anchorBlockId: anchorBlockId,
+        anchorTextOffset: anchorTextOffset,
+        anchorListItemIndex: anchorListItemIndex,
       ),
       shouldPushHistory: false,
     );
+  }
+
+  int? currentTextAnchorOffset() {
+    if (_activeTextNodeId != null && _activeSelection.isValid) {
+      return _normalizedSelection(_activeSelection).extentOffset;
+    }
+    if (_lastTextNodeId != null && _lastTextSelection.isValid) {
+      return _normalizedSelection(_lastTextSelection).extentOffset;
+    }
+    return null;
+  }
+
+  int? currentListAnchorOffset() {
+    if (_activeListNodeId != null && _activeListSelection.isValid) {
+      return _normalizedSelection(_activeListSelection).extentOffset;
+    }
+    if (_lastListNodeId != null && _lastListSelection.isValid) {
+      return _normalizedSelection(_lastListSelection).extentOffset;
+    }
+    return null;
   }
 
   void updateImageWrapSegments(String id, TextEditingValue value) {

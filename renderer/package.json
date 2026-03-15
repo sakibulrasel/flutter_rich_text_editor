@@ -1,6 +1,6 @@
 {
   "name": "rich-text-editor-renderer",
-  "version": "0.4.0",
+  "version": "0.4.3",
   "description": "Browser renderer for rich_text_editor JSON documents",
   "type": "module",
   "main": "./dist/index.cjs",

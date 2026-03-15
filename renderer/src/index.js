@@ -40,18 +40,22 @@ export function renderRichTextDocument({
   element.appendChild(floatingRoot);
 
   renderStaticNodes(flowRoot, documentModel);
-  rerenderLayout({ host: element, flowRoot, floatingRoot, documentModel });
+  const performLayout = ({ rerunMath = true } = {}) => {
+    rerenderLayout({ host: element, flowRoot, floatingRoot, documentModel });
+    if (rerunMath && resolvedOptions.autoMathJaxTypeset) {
+      requestMathTypeset(element).then(() => {
+        rerenderLayout({ host: element, flowRoot, floatingRoot, documentModel });
+        return requestMathTypeset(element);
+      });
+    }
+  };
 
-  if (resolvedOptions.autoMathJaxTypeset) {
-    requestMathTypeset(element);
-  }
+  performLayout();
+  attachDeferredLayoutPasses(element, performLayout);
 
   return {
     rerender() {
-      rerenderLayout({ host: element, flowRoot, floatingRoot, documentModel });
-      if (resolvedOptions.autoMathJaxTypeset) {
-        requestMathTypeset(element);
-      }
+      performLayout();
     },
     destroy() {
       element.innerHTML = '';
@@ -373,6 +377,10 @@ function buildFloatingRects(documentModel, nodeRects) {
 
 function resolveAnchorRect(nodes, imageIndex, nodeRects) {
   const imageNode = nodes[imageIndex];
+  const textAnchorRect = resolveTextAnchorRect(imageNode);
+  if (textAnchorRect) {
+    return textAnchorRect;
+  }
   if (imageNode.anchorBlockId && nodeRects[imageNode.anchorBlockId]) {
     return nodeRects[imageNode.anchorBlockId];
   }
@@ -399,6 +407,110 @@ function resolveAnchorRect(nodes, imageIndex, nodeRects) {
   }
 
   return null;
+}
+
+function resolveTextAnchorRect(imageNode) {
+  if (imageNode.anchorTextOffset == null || imageNode.anchorBlockId == null) {
+    return null;
+  }
+
+  const targetNodeId = imageNode.anchorListItemIndex != null
+    ? `${imageNode.anchorBlockId}::${imageNode.anchorListItemIndex}`
+    : imageNode.anchorBlockId;
+  const target = queryNode(document, targetNodeId);
+  if (!target) {
+    return null;
+  }
+
+  const host = target.closest('.rte-render-root');
+  if (!host) {
+    return null;
+  }
+  const hostRect = host.getBoundingClientRect();
+  const tokens = Array.from(target.querySelectorAll('[data-start-offset][data-end-offset]'));
+  if (tokens.length === 0) {
+    return null;
+  }
+
+  const offset = imageNode.anchorTextOffset;
+  let previousToken = null;
+  let nextToken = null;
+
+  for (const token of tokens) {
+    const start = Number(token.dataset.startOffset);
+    const end = Number(token.dataset.endOffset);
+    if (offset >= start && offset <= end) {
+      return buildCaretRectForToken(token, offset, hostRect);
+    }
+    if (end <= offset) {
+      previousToken = token;
+      continue;
+    }
+    nextToken = token;
+    break;
+  }
+
+  if (previousToken) {
+    const rect = previousToken.getBoundingClientRect();
+    return {
+      left: rect.right - hostRect.left,
+      top: rect.top - hostRect.top,
+      width: 0,
+      height: rect.height,
+      right: rect.right - hostRect.left,
+      bottom: rect.bottom - hostRect.top,
+    };
+  }
+
+  if (nextToken) {
+    const rect = nextToken.getBoundingClientRect();
+    return {
+      left: rect.left - hostRect.left,
+      top: rect.top - hostRect.top,
+      width: 0,
+      height: rect.height,
+      right: rect.left - hostRect.left,
+      bottom: rect.bottom - hostRect.top,
+    };
+  }
+
+  return null;
+}
+
+function buildCaretRectForToken(token, offset, hostRect) {
+  const start = Number(token.dataset.startOffset);
+  const end = Number(token.dataset.endOffset);
+  if (token.dataset.isMath === 'true' || !token.firstChild || token.firstChild.nodeType !== Node.TEXT_NODE) {
+    const rect = token.getBoundingClientRect();
+    const pointX = offset <= start ? rect.left : rect.right;
+    return {
+      left: pointX - hostRect.left,
+      top: rect.top - hostRect.top,
+      width: 0,
+      height: rect.height,
+      right: pointX - hostRect.left,
+      bottom: rect.bottom - hostRect.top,
+    };
+  }
+
+  const textNode = token.firstChild;
+  const localOffset = clamp(offset - start, 0, end - start);
+  const range = document.createRange();
+  range.setStart(textNode, localOffset);
+  range.setEnd(textNode, localOffset);
+  const rect = range.getBoundingClientRect();
+  const fallbackRect = token.getBoundingClientRect();
+  const left = rect.width === 0 && rect.height === 0 ? fallbackRect.left : rect.left;
+  const top = rect.width === 0 && rect.height === 0 ? fallbackRect.top : rect.top;
+  const bottom = rect.width === 0 && rect.height === 0 ? fallbackRect.bottom : rect.bottom;
+  return {
+    left: left - hostRect.left,
+    top: top - hostRect.top,
+    width: 0,
+    height: bottom - top,
+    right: left - hostRect.left,
+    bottom: bottom - hostRect.top,
+  };
 }
 
 function renderFloatingImages(host, floatingRoot, floatRects) {
@@ -571,6 +683,7 @@ function buildWrappedLayout(segments, style, bands, width) {
 
 function tokenizeSegments(segments = []) {
   const tokens = [];
+  let offset = 0;
   segments.forEach((segment, index) => {
     if (segment.inlineMathLatex) {
       tokens.push({
@@ -580,9 +693,22 @@ function tokenizeSegments(segments = []) {
         underline: false,
         link: null,
         isMath: true,
+        startOffset: offset,
+        endOffset: offset + 1,
       });
+      offset += 1;
       if (index !== segments.length - 1) {
-        tokens.push({ value: ' ', bold: false, italic: false, underline: false, link: null, isMath: false });
+        tokens.push({
+          value: ' ',
+          bold: false,
+          italic: false,
+          underline: false,
+          link: null,
+          isMath: false,
+          startOffset: offset,
+          endOffset: offset + 1,
+        });
+        offset += 1;
       }
       return;
     }
@@ -591,16 +717,20 @@ function tokenizeSegments(segments = []) {
     const matches = text.match(/\S+\s*/g);
     if (!matches || matches.length === 0) {
       if (text.length > 0) {
-        tokens.push(toTextToken(segment, text));
+        tokens.push(toTextToken(segment, text, offset));
+        offset += text.length;
       }
       return;
     }
-    matches.forEach((part) => tokens.push(toTextToken(segment, part)));
+    matches.forEach((part) => {
+      tokens.push(toTextToken(segment, part, offset));
+      offset += part.length;
+    });
   });
   return tokens;
 }
 
-function toTextToken(segment, value) {
+function toTextToken(segment, value, startOffset) {
   return {
     value,
     bold: !!segment.bold,
@@ -608,6 +738,8 @@ function toTextToken(segment, value) {
     underline: !!segment.underline,
     link: segment.link || null,
     isMath: false,
+    startOffset,
+    endOffset: startOffset + value.length,
   };
 }
 
@@ -655,6 +787,9 @@ function buildTokenElement(token) {
   if (token.link) {
     element.href = token.link;
   }
+  element.dataset.startOffset = String(token.startOffset);
+  element.dataset.endOffset = String(token.endOffset);
+  element.dataset.isMath = token.isMath ? 'true' : 'false';
   element.innerHTML = token.isMath ? token.value : escapeHtml(token.value);
   return element;
 }
@@ -689,8 +824,47 @@ function hasWrapSegments(segments = []) {
 
 function requestMathTypeset(element) {
   if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
-    window.MathJax.typesetPromise([element]).catch(() => {});
+    return window.MathJax.typesetPromise([element]).catch(() => {});
   }
+  return Promise.resolve();
+}
+
+function attachDeferredLayoutPasses(element, performLayout) {
+  const scheduleLayout = createLayoutScheduler(() => performLayout());
+
+  element.querySelectorAll('img').forEach((image) => {
+    if (!image.complete) {
+      image.addEventListener('load', scheduleLayout, { once: true });
+      image.addEventListener('error', scheduleLayout, { once: true });
+    }
+  });
+
+  if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(scheduleLayout).catch(() => {});
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('load', scheduleLayout, { once: true });
+  }
+}
+
+function createLayoutScheduler(callback) {
+  let scheduled = false;
+  return () => {
+    if (scheduled) {
+      return;
+    }
+    scheduled = true;
+    const run = () => {
+      scheduled = false;
+      callback();
+    };
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(run);
+      return;
+    }
+    setTimeout(run, 0);
+  };
 }
 
 function clamp(value, min, max) {

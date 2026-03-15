@@ -95,6 +95,25 @@ void main() {
     expect(json, contains('"anchorBlockId": "node_0"'));
   });
 
+  test('controller serializes floating image text anchor fields', () {
+    final controller = RichTextEditorController();
+
+    controller.insertImage(
+      url: 'https://example.com/floating.png',
+      altText: 'Floating diagram',
+      layoutMode: ImageLayoutMode.floating,
+      textWrapMode: ImageTextWrap.around,
+      anchorBlockId: 'node_0',
+      anchorTextOffset: 7,
+      anchorListItemIndex: 1,
+    );
+
+    final json = controller.toJsonString();
+
+    expect(json, contains('"anchorTextOffset": 7'));
+    expect(json, contains('"anchorListItemIndex": 1'));
+  });
+
   test('list items can serialize inline math', () {
     final node = ListNode(
       id: 'list_1',

@@ -525,6 +525,13 @@ class _EditorToolbar extends StatelessWidget {
                       controller.activeTextNodeId ??
                       controller.activeListNodeId ??
                       controller.selectedNodeId,
+                  anchorTextOffset: controller.activeTextNodeId != null
+                      ? controller.currentTextAnchorOffset()
+                      : controller.currentListAnchorOffset(),
+                  anchorListItemIndex: controller.activeListNodeId != null
+                      ? (controller.activeListItemIndex ??
+                          controller.lastListItemIndex)
+                      : null,
                   wrapText: image.wrapText,
                   wrapAlignment: image.wrapAlignment,
                 );
@@ -1689,6 +1696,8 @@ class _FloatingImageOverlayState extends State<_FloatingImageOverlay> {
       width: _width,
       height: _height,
       anchorBlockId: widget.onResolveAnchorId(floatingRect),
+      anchorTextOffset: widget.node.anchorTextOffset,
+      anchorListItemIndex: widget.node.anchorListItemIndex,
     );
     _rawX = _x;
     _rawY = _y;

@@ -3,7 +3,7 @@ import 'package:rich_text_editor/rich_text_editor.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 const _rendererScriptUrl =
-    'https://cdn.jsdelivr.net/npm/rich-text-editor-renderer@0.4.0/dist/index.global.js?build=20260315';
+    'https://cdn.jsdelivr.net/npm/rich-text-editor-renderer@0.4.3/dist/index.global.js?build=20260315';
 const _mathJaxScriptUrl =
     'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js';
 
@@ -260,7 +260,6 @@ class _DemoScreenState extends State<DemoScreen> {
           ],
           style: ListStyle.unordered,
         ),
-
       ],
     );
   }
@@ -373,7 +372,6 @@ class _HtmlPreviewScreenState extends State<HtmlPreviewScreen> {
                 ),
               ),
             ),
-
           ],
         ),
       ),
